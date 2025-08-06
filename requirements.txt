@@ -1,6 +1,7 @@
 streamlit>=1.22.0
 pandas>=1.5.0
-openpyxl>=3.0.10  # For Excel support
-plotly>=5.11.0    # For interactive graphs
+plotly>=5.11.0
+openpyxl>=3.0.10
 numpy>=1.23.5
 python-dateutil>=2.8.2
+xlrd>=2.0.1
