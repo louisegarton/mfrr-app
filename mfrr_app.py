@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+import plotly.express as px
 from datetime import datetime
 
 # Load your data
@@ -74,85 +73,99 @@ if aggregation == 'Daily Average' and not filtered_df.empty:
     aggregated_df['Period'] = pd.to_datetime(aggregated_df['Date'])
     filtered_df = aggregated_df
 
-# Plotting
+# Plotting with Plotly
 if not filtered_df.empty:
     st.header('Price Visualization')
     
-    # Create figure and axis
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    # Plot each selected Elområde
-    for elomrade in selected_elomrade:
-        subset = filtered_df[filtered_df['Elområde'] == elomrade]
-        ax.plot(subset['Period'], subset['mFRR Upp Pris (EUR/MW)'], 
-                label=f'{elomrade} - Up Price')
-        ax.plot(subset['Period'], subset['mFRR Ned Pris (EUR/MW)'], 
-                linestyle='--', label=f'{elomrade} - Down Price')
-    
-    # Formatting
-    ax.set_xlabel('Period')
-    ax.set_ylabel('Price (EUR/MW)')
-    ax.set_title('mFRR Up and Down Prices')
-    ax.legend()
-    
-    if aggregation == 'Daily Average':
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    else:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-    
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig)
-    
-    # Volume visualization
-    st.header('Volume Visualization')
-    
-    fig2, ax2 = plt.subplots(figsize=(12, 6))
-    
-    for elomrade in selected_elomrade:
-        subset = filtered_df[filtered_df['Elområde'] == elomrade]
-        ax2.plot(subset['Period'], subset['mFRR Upp Volym (MW)'], 
-                label=f'{elomrade} - Up Volume')
-        ax2.plot(subset['Period'], subset['mFRR Ned Volym (MW)'], 
-                linestyle='--', label=f'{elomrade} - Down Volume')
-    
-    ax2.set_xlabel('Period')
-    ax2.set_ylabel('Volume (MW)')
-    ax2.set_title('mFRR Up and Down Volumes')
-    ax2.legend()
-    
-    if aggregation == 'Daily Average':
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    else:
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-    
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig2)
-
-    # Show top 5 highest price points
-    st.header('Top 5 Highest Price Points')
-    
-    # Combine up and down prices for analysis
-    top_prices = filtered_df.melt(
+    # Create a melted dataframe for Plotly
+    price_df = filtered_df.melt(
         id_vars=['Period', 'Elområde'],
         value_vars=['mFRR Upp Pris (EUR/MW)', 'mFRR Ned Pris (EUR/MW)'],
         var_name='Price Type',
         value_name='Price'
     )
     
+    # Clean up price type names
+    price_df['Price Type'] = price_df['Price Type'].str.replace('mFRR ', '').str.replace(' Pris (EUR/MW)', '')
+    
+    # Create interactive plot
+    fig = px.line(
+        price_df,
+        x='Period',
+        y='Price',
+        color='Elområde',
+        line_dash='Price Type',
+        title='mFRR Up and Down Prices',
+        labels={'Price': 'Price (EUR/MW)', 'Period': 'Date'},
+        hover_data={'Price': ':.2f', 'Period': '|%Y-%m-%d %H:%M'},
+    )
+    
+    # Improve hover template
+    fig.update_traces(
+        hovertemplate="<br>".join([
+            "Elområde: %{customdata[0]}",
+            "Date: %{x|%Y-%m-%d %H:%M}",
+            "Price: %{y:.2f} EUR/MW",
+            "Type: %{customdata[1]}"
+        ])
+    )
+    
+    # Show the plot
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Volume visualization
+    st.header('Volume Visualization')
+    
+    # Create a melted dataframe for volumes
+    volume_df = filtered_df.melt(
+        id_vars=['Period', 'Elområde'],
+        value_vars=['mFRR Upp Volym (MW)', 'mFRR Ned Volym (MW)'],
+        var_name='Volume Type',
+        value_name='Volume'
+    )
+    
+    # Clean up volume type names
+    volume_df['Volume Type'] = volume_df['Volume Type'].str.replace('mFRR ', '').str.replace(' Volym (MW)', '')
+    
+    # Create interactive plot
+    fig2 = px.line(
+        volume_df,
+        x='Period',
+        y='Volume',
+        color='Elområde',
+        line_dash='Volume Type',
+        title='mFRR Up and Down Volumes',
+        labels={'Volume': 'Volume (MW)', 'Period': 'Date'},
+        hover_data={'Volume': ':.2f', 'Period': '|%Y-%m-%d %H:%M'},
+    )
+    
+    # Improve hover template
+    fig2.update_traces(
+        hovertemplate="<br>".join([
+            "Elområde: %{customdata[0]}",
+            "Date: %{x|%Y-%m-%d %H:%M}",
+            "Volume: %{y:.2f} MW",
+            "Type: %{customdata[1]}"
+        ])
+    )
+    
+    # Show the plot
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Show top 5 highest price points
+    st.header('Top 5 Highest Price Points')
+    
     # Get top 5 highest prices
-    top_5 = top_prices.nlargest(5, 'Price')
+    top_5 = price_df.nlargest(5, 'Price')
     
     # Format for display
     display_df = top_5[[
         'Period', 'Elområde', 'Price Type', 'Price'
     ]].copy()
-    display_df['Price Type'] = display_df['Price Type'].str.replace(
-        'mFRR ', '').str.replace(' Pris (EUR/MW)', '')
     
     st.dataframe(display_df.style.format({
-        'Price': '{:.2f} EUR/MW'
+        'Price': '{:.2f} EUR/MW',
+        'Period': lambda x: x.strftime('%Y-%m-%d %H:%M')
     }))
     
 else:
