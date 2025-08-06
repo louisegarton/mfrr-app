@@ -5,19 +5,15 @@ import matplotlib.dates as mdates
 from datetime import datetime
 
 # Load your data
-@st.cache_data  # This decorator caches the data to avoid reloading on every interaction
+@st.cache_data
 def load_data():
-    # Adjust the path if your file is in a different location
-    df = pd.read_excel('MFRR CM.xlsx', sheet_name='Sheet1')
-    
-    # Convert 'Period' to datetime if it's not already
-    df['Period'] = pd.to_datetime(df['Period'])
-    
-    # Convert 'Publiceringstidpunkt' to datetime if needed
-    if 'Publiceringstidpunkt' in df.columns:
-        df['Publiceringstidpunkt'] = pd.to_datetime(df['Publiceringstidpunkt'])
-    
-    return df
+    try:
+        df = pd.read_excel("MFRR CM.xlsx", sheet_name="Sheet1")
+        df['Period'] = pd.to_datetime(df['Period'])
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame()
 
 df = load_data()
 
@@ -31,7 +27,7 @@ st.sidebar.header('Filter Options')
 selected_elomrade = st.sidebar.multiselect(
     'Select Elområde',
     options=df['Elområde'].unique(),
-    default=['SN1']  # Default selection
+    default=['SN1'] if 'SN1' in df['Elområde'].unique() else []
 )
 
 # Aggregation option
@@ -57,11 +53,10 @@ if not df.empty:
 # Filter data based on selections
 filtered_df = df.copy()
 
-# Apply Elområde filter
+# Apply filters
 if selected_elomrade:
     filtered_df = filtered_df[filtered_df['Elområde'].isin(selected_elomrade)]
-
-# Apply date range filter
+    
 filtered_df = filtered_df[
     (filtered_df['Period'] >= date_range[0]) & 
     (filtered_df['Period'] <= date_range[1])
@@ -69,24 +64,15 @@ filtered_df = filtered_df[
 
 # Apply aggregation if selected
 if aggregation == 'Daily Average' and not filtered_df.empty:
-    # Create a date column without time for grouping
     filtered_df['Date'] = filtered_df['Period'].dt.date
-    
-    # Group by Date and Elområde, calculate mean
     aggregated_df = filtered_df.groupby(['Date', 'Elområde']).agg({
         'mFRR Upp Pris (EUR/MW)': 'mean',
         'mFRR Upp Volym (MW)': 'mean',
         'mFRR Ned Pris (EUR/MW)': 'mean',
         'mFRR Ned Volym (MW)': 'mean'
     }).reset_index()
-    
-    # Convert back to datetime for plotting
     aggregated_df['Period'] = pd.to_datetime(aggregated_df['Date'])
     filtered_df = aggregated_df
-
-# Display filtered data
-st.write(f"Displaying {len(filtered_df)} records")
-st.dataframe(filtered_df.head())
 
 # Plotting
 if not filtered_df.empty:
@@ -109,7 +95,6 @@ if not filtered_df.empty:
     ax.set_title('mFRR Up and Down Prices')
     ax.legend()
     
-    # Format x-axis based on time range
     if aggregation == 'Daily Average':
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
     else:
@@ -117,7 +102,6 @@ if not filtered_df.empty:
     
     plt.xticks(rotation=45)
     plt.tight_layout()
-    
     st.pyplot(fig)
     
     # Volume visualization
@@ -144,7 +128,32 @@ if not filtered_df.empty:
     
     plt.xticks(rotation=45)
     plt.tight_layout()
-    
     st.pyplot(fig2)
+
+    # Show top 5 highest price points
+    st.header('Top 5 Highest Price Points')
+    
+    # Combine up and down prices for analysis
+    top_prices = filtered_df.melt(
+        id_vars=['Period', 'Elområde'],
+        value_vars=['mFRR Upp Pris (EUR/MW)', 'mFRR Ned Pris (EUR/MW)'],
+        var_name='Price Type',
+        value_name='Price'
+    )
+    
+    # Get top 5 highest prices
+    top_5 = top_prices.nlargest(5, 'Price')
+    
+    # Format for display
+    display_df = top_5[[
+        'Period', 'Elområde', 'Price Type', 'Price'
+    ]].copy()
+    display_df['Price Type'] = display_df['Price Type'].str.replace(
+        'mFRR ', '').str.replace(' Pris (EUR/MW)', '')
+    
+    st.dataframe(display_df.style.format({
+        'Price': '{:.2f} EUR/MW'
+    }))
+    
 else:
     st.warning("No data available for the selected filters.")
