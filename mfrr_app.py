@@ -1,111 +1,128 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 
-# Load data functions
-@st.cache_data
-def load_mfrr_data():
+# Cache data with optimized loading
+@st.cache_data(ttl=3600)
+def load_data():
     try:
-        df = pd.read_excel("MFRR CM.xlsx", sheet_name="Sheet1")
-        df['Period'] = pd.to_datetime(df['Period'])
-        return df
+        mfrr_df = pd.read_excel("MFRR CM.xlsx", sheet_name="Sheet1")
+        mfrr_df['Period'] = pd.to_datetime(mfrr_df['Period'])
+        
+        fcr_df = pd.read_excel("FCR Dashboard.xlsx", sheet_name="data 2021-2023")
+        fcr_df['Datum'] = pd.to_datetime(fcr_df['Datum'])
+        
+        return mfrr_df, fcr_df
     except Exception as e:
-        st.error(f"Error loading MFRR data: {e}")
-        return pd.DataFrame()
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data
-def load_fcr_data():
-    try:
-        df = pd.read_excel("FCR Dashboard.xlsx", sheet_name="data 2021-2023")
-        df['Datum'] = pd.to_datetime(df['Datum'])
-        return df
-    except Exception as e:
-        st.error(f"Error loading FCR data: {e}")
-        return pd.DataFrame()
-
-# Load all data
-mfrr_df = load_mfrr_data()
-fcr_df = load_fcr_data()
+mfrr_df, fcr_df = load_data()
 
 # Title
 st.title('Energy Market Dashboard')
 
-# Date range selection
-date_col1, date_col2 = st.columns(2)
-with date_col1:
-    start_date = st.date_input(
-        "Start date",
-        value=min(mfrr_df['Period'].min(), fcr_df['Datum'].min()),
-        min_value=min(mfrr_df['Period'].min(), fcr_df['Datum'].min()),
-        max_value=max(mfrr_df['Period'].max(), fcr_df['Datum'].max())
-    )
-with date_col2:
-    end_date = st.date_input(
-        "End date",
-        value=max(mfrr_df['Period'].max(), fcr_df['Datum'].max()),
-        min_value=min(mfrr_df['Period'].min(), fcr_df['Datum'].min()),
-        max_value=max(mfrr_df['Period'].max(), fcr_df['Datum'].max())
-    )
+# Get date range
+min_date = min(mfrr_df['Period'].min(), fcr_df['Datum'].min())
+max_date = max(mfrr_df['Period'].max(), fcr_df['Datum'].max())
+
+# Date selection
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.date_input("Start date", value=min_date, min_value=min_date, max_value=max_date)
+with col2:
+    end_date = st.date_input("End date", value=max_date, min_value=min_date, max_value=max_date)
 
 # Convert to datetime
 start_date = datetime.combine(start_date, datetime.min.time())
 end_date = datetime.combine(end_date, datetime.min.time())
 
+# Filter data
+date_filter = lambda df, col: df[(df[col] >= start_date) & (df[col] <= end_date)]
+mfrr_df_filtered = date_filter(mfrr_df, 'Period')
+fcr_df_filtered = date_filter(fcr_df, 'Datum')
+
 # FCR Price Visualization
 st.header('FCR Prices')
-fcr_price_cols = ['FCR-N Pris (EUR/MW)', 'FCR-D upp Pris (EUR/MW)', 'FCR-D ned Pris (EUR/MW)']
-fcr_price_df = fcr_df[['Datum'] + fcr_price_cols].copy()
-fcr_price_df = fcr_price_df.melt(
-    id_vars=['Datum'], 
-    value_vars=fcr_price_cols,
+
+# Prepare FCR data
+fcr_price_df = fcr_df_filtered.melt(
+    id_vars=['Datum'],
+    value_vars=['FCR-N Pris (EUR/MW)', 'FCR-D upp Pris (EUR/MW)', 'FCR-D ned Pris (EUR/MW)'],
     var_name='Product',
     value_name='Price'
 )
 fcr_price_df['Product'] = fcr_price_df['Product'].str.replace(' Pris \(EUR/MW\)', '', regex=True)
-fcr_price_df = fcr_price_df[(fcr_price_df['Datum'] >= start_date) & (fcr_price_df['Datum'] <= end_date)]
 
-fig_fcr = px.area(
-    fcr_price_df,
-    x='Datum',
-    y='Price',
-    color='Product',
+# Create combined FCR plot
+fig_fcr = go.Figure()
+
+# Add stacked areas for FCR-D
+for product in ['FCR-D upp', 'FCR-D ned']:
+    product_df = fcr_price_df[fcr_price_df['Product'] == product]
+    fig_fcr.add_trace(go.Scatter(
+        x=product_df['Datum'],
+        y=product_df['Price'],
+        stackgroup='fcr_d',
+        name=product,
+        mode='lines',
+        line=dict(width=0.5),
+        hoverinfo='x+y+name'
+    ))
+
+# Add line for FCR-N
+fcr_n_df = fcr_price_df[fcr_price_df['Product'] == 'FCR-N']
+fig_fcr.add_trace(go.Scatter(
+    x=fcr_n_df['Datum'],
+    y=fcr_n_df['Price'],
+    name='FCR-N',
+    mode='lines',
+    line=dict(color='red', width=2),
+    hoverinfo='x+y+name'
+))
+
+fig_fcr.update_layout(
     title='FCR Prices (EUR/MW)',
-    labels={'Price': 'Price (EUR/MW)', 'Datum': 'Date'},
-    hover_data={'Price': ':.2f', 'Datum': '|%Y-%m-%d %H:%M'},
-    facet_col='Product',
-    facet_col_wrap=1,
-    height=800
+    yaxis_title='Price (EUR/MW)',
+    hovermode='x unified',
+    showlegend=True
 )
-fig_fcr.update_yaxes(matches=None)
+
 st.plotly_chart(fig_fcr, use_container_width=True)
 
 # mFRR Price Visualization
 st.header('mFRR Prices')
-mfrr_price_cols = ['mFRR Upp Pris (EUR/MW)', 'mFRR Ned Pris (EUR/MW)']
-mfrr_price_df = mfrr_df[['Period'] + mfrr_price_cols].copy()
-mfrr_price_df = mfrr_price_df.melt(
-    id_vars=['Period'], 
-    value_vars=mfrr_price_cols,
+
+# Prepare mFRR data
+mfrr_price_df = mfrr_df_filtered.melt(
+    id_vars=['Period'],
+    value_vars=['mFRR Upp Pris (EUR/MW)', 'mFRR Ned Pris (EUR/MW)'],
     var_name='Product',
     value_name='Price'
 )
 mfrr_price_df['Product'] = mfrr_price_df['Product'].str.replace('mFRR ', '').str.replace(' Pris \(EUR/MW\)', '', regex=True)
-mfrr_price_df = mfrr_price_df[(mfrr_price_df['Period'] >= start_date) & (mfrr_price_df['Period'] <= end_date)]
 
-fig_mfrr = px.line(
-    mfrr_price_df,
-    x='Period',
-    y='Price',
-    color='Product',
+# Create combined mFRR plot
+fig_mfrr = go.Figure()
+
+for product in ['Upp', 'Ned']:
+    product_df = mfrr_price_df[mfrr_price_df['Product'] == product]
+    fig_mfrr.add_trace(go.Scatter(
+        x=product_df['Period'],
+        y=product_df['Price'],
+        name=f'mFRR {product}',
+        mode='lines',
+        hoverinfo='x+y+name'
+    ))
+
+fig_mfrr.update_layout(
     title='mFRR Prices (EUR/MW)',
-    labels={'Price': 'Price (EUR/MW)', 'Period': 'Date'},
-    hover_data={'Price': ':.2f', 'Period': '|%Y-%m-%d %H:%M'},
-    facet_col='Product',
-    facet_col_wrap=1,
-    height=600
+    yaxis_title='Price (EUR/MW)',
+    hovermode='x unified'
 )
-fig_mfrr.update_yaxes(matches=None)
+
 st.plotly_chart(fig_mfrr, use_container_width=True)
 
 # Price Analysis Section
@@ -117,9 +134,9 @@ all_prices = pd.concat([
     mfrr_price_df.rename(columns={'Period': 'Date', 'Product': 'Market'}).assign(Market=lambda x: 'mFRR ' + x['Market'])
 ])
 
-# Top Price Points Table
-st.subheader(f'Top Price Points')
-top_n = st.slider('Number of top prices to show', 5, 50, 10, key='top_n_slider')
+# Top Price Points
+st.subheader('Top Price Points')
+top_n = st.slider('Number of top prices to show', 5, 50, 10)
 top_prices = all_prices.nlargest(top_n, 'Price')[['Date', 'Market', 'Price']]
 st.dataframe(
     top_prices.style.format({
@@ -129,7 +146,7 @@ st.dataframe(
     height=min((top_n + 1) * 35 + 3, 500)
 )
 
-# Price Distribution Plot
+# Price Distribution
 st.subheader('Price Distribution')
 fig_dist = px.box(
     all_prices,
